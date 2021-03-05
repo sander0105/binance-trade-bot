@@ -1,8 +1,10 @@
+import math
 import random
 from datetime import datetime
 from typing import Dict, List
 
 from sqlalchemy.orm import Session
+from termcolor import cprint
 
 from .binance_api_manager import BinanceAPIManager
 from .config import Config
@@ -50,7 +52,8 @@ class AutoTrader:
                 from_coin_price = get_market_ticker_price_from_list(all_tickers, pair.from_coin + self.config.BRIDGE)
 
                 if from_coin_price is None:
-                    self.logger.info("Skipping update for coin {0} not found".format(pair.from_coin + self.config.BRIDGE))
+                    self.logger.info(
+                        "Skipping update for coin {0} not found".format(pair.from_coin + self.config.BRIDGE))
                     continue
 
                 pair.ratio = from_coin_price / current_coin_price
@@ -70,12 +73,14 @@ class AutoTrader:
 
                 from_coin_price = get_market_ticker_price_from_list(all_tickers, pair.from_coin + self.config.BRIDGE)
                 if from_coin_price is None:
-                    self.logger.info("Skipping initializing {0}, symbol not found".format(pair.from_coin + self.config.BRIDGE))
+                    self.logger.info(
+                        "Skipping initializing {0}, symbol not found".format(pair.from_coin + self.config.BRIDGE))
                     continue
 
                 to_coin_price = get_market_ticker_price_from_list(all_tickers, pair.to_coin + self.config.BRIDGE)
                 if to_coin_price is None:
-                    self.logger.info("Skipping initializing {0}, symbol not found".format(pair.to_coin + self.config.BRIDGE))
+                    self.logger.info(
+                        "Skipping initializing {0}, symbol not found".format(pair.to_coin + self.config.BRIDGE))
                     continue
 
                 pair.ratio = from_coin_price / to_coin_price
@@ -113,12 +118,13 @@ class AutoTrader:
         # Display on the console, the current coin+Bridge, so users can see *some* activity and not thinkg the bot has stopped. Not logging though to reduce log size.
         print(str(
             datetime.now()) + " - CONSOLE - INFO - I am scouting the best trades. Current coin: {0} ".format(
-            current_coin + self.config.BRIDGE), end='\r')
+            current_coin + self.config.BRIDGE), end='\r\n')
 
         current_coin_price = get_market_ticker_price_from_list(all_tickers, current_coin + self.config.BRIDGE)
 
         if current_coin_price is None:
-            self.logger.info("Skipping scouting... current coin {0} not found".format(current_coin + self.config.BRIDGE))
+            self.logger.info(
+                "Skipping scouting... current coin {0} not found".format(current_coin + self.config.BRIDGE))
             return
 
         ratio_dict: Dict[Pair, float] = {}
@@ -128,8 +134,10 @@ class AutoTrader:
                 continue
             optional_coin_price = get_market_ticker_price_from_list(all_tickers, pair.to_coin + self.config.BRIDGE)
 
+
             if optional_coin_price is None:
-                self.logger.info("Skipping scouting... optional coin {0} not found".format(pair.to_coin + self.config.BRIDGE))
+                self.logger.info(
+                    "Skipping scouting... optional coin {0} not found".format(pair.to_coin + self.config.BRIDGE))
                 continue
 
             self.db.log_scout(pair, pair.ratio, current_coin_price, optional_coin_price)
@@ -137,8 +145,12 @@ class AutoTrader:
             # Obtain (current coin)/(optional coin)
             coin_opt_coin_ratio = current_coin_price / optional_coin_price
 
+            current_ratio = coin_opt_coin_ratio - self.config.SCOUT_TRANSACTION_FEE * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio
+            self.scout_extended_console_output(current_coin, current_ratio, pair.ratio, pair.to_coin)
+
             # save ratio so we can pick the best option, not necessarily the first
-            ratio_dict[pair] = (coin_opt_coin_ratio - self.config.SCOUT_TRANSACTION_FEE * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio) - pair.ratio
+            ratio_dict[pair] = (
+                                       coin_opt_coin_ratio - self.config.SCOUT_TRANSACTION_FEE * self.config.SCOUT_MULTIPLIER * coin_opt_coin_ratio) - pair.ratio
 
         # keep only ratios bigger than zero
         ratio_dict = {k: v for k, v in ratio_dict.items() if v > 0}
@@ -149,6 +161,30 @@ class AutoTrader:
             self.logger.info('Will be jumping from {0} to {1}'.format(
                 current_coin, best_pair.to_coin_id))
             self.transaction_through_bridge(best_pair, all_tickers)
+
+    @staticmethod
+    def repeat_to_length(string_to_expand, length):
+        return (string_to_expand * (int(length / len(string_to_expand)) + 1))[:length]
+
+    @staticmethod
+    def scout_extended_console_output(current_coin, current_ratio, required_ratio, target_coin):
+        difference = (current_ratio - required_ratio) / required_ratio * 100
+        text = ('Will not from {0} to {1}'.format(
+            current_coin,
+            target_coin
+        ))
+        text = text.ljust(30, ' ') + 'Cur: {0}, Req: {1}'.format(
+            round(current_ratio, 10),
+            round(required_ratio, 10)
+        )
+        text = text.ljust(80, ' ') + '| {0} % '.format(round(difference, 2))
+        text = text.ljust(92, ' ') + AutoTrader.repeat_to_length(u'\u2589', math.ceil(abs(difference)))
+        if difference >= -1:
+            cprint(text, 'green', attrs=['bold'])
+        elif difference >= -5:
+            cprint(text, 'yellow')
+        else:
+            cprint(text, 'red')
 
     def update_values(self):
         '''
